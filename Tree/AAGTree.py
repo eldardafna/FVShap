@@ -1,5 +1,6 @@
 from typing import Callable
 import math
+import re
 
 class TreeNode:
     def __init__(self):
@@ -379,29 +380,36 @@ class AAGTree:
 
                 # Header
                 if line_num == 1:
-                    header = line.split(' ')
-                    assert len(header) == 6
-                    assert header[0] == "aag"
-                    self.vars_num, self.inputs_num, self.latches_num, self.outputs_num, self.and_gates_num = [int(word) for word in header[1:6]]
+                    header_pattern = r"aag (?P<M>\d+) (?P<I>\d+) (?P<L>\d+) (?P<O>\d+) (?P<A>\d+)( (?P<B>\d+))?"
+                    match = re.match(header_pattern, line)
+                    assert match
+                    self.vars_num = int(match.group('M'))
+                    self.inputs_num = int(match.group('I'))
+                    self.latches_num = int(match.group('L'))
+                    self.outputs_num = int(match.group('O'))
+                    self.and_gates_num = int(match.group('A'))
+                    if match.group('B'):
+                        self.bad_states_num = int(match.group('B'))
+
                     self.circuit = BinaryCircuit(self.vars_num)
 
                 # Inputs
-                elif 1 < line_num <= 1+self.inputs_num:
+                elif 1 < line_num <= 1 + self.inputs_num:
                     my_input = line.split(' ')
                     assert len(my_input) == 1
                     self.circuit.add_input(int(my_input[0]))
 
                 # Latches
-                elif 1+self.inputs_num < line_num <= 1 + self.inputs_num + self.latches_num:
+                elif 1 + self.inputs_num < line_num <= 1 + self.inputs_num + self.latches_num:
                     my_latch = line.split(' ')
                     assert len(my_latch) == 2
                     self.circuit.add_latch(int(my_latch[0]), int(my_latch[1]))
 
                 # Outputs
                 elif 1 + self.inputs_num + self.latches_num < line_num <= 1 + self.inputs_num + self.latches_num + self.outputs_num:
-                   my_output = line.split(' ')
-                   assert len(my_output) == 1
-                   self.circuit.add_output(int(my_output[0]))
+                    my_output = line.split(' ')
+                    assert len(my_output) == 1
+                    self.circuit.add_output(int(my_output[0]))
 
                 # And Gates
                 elif 1 + self.inputs_num + self.latches_num + self.outputs_num < line_num <= 1 + self.inputs_num + self.latches_num + self.outputs_num + self.and_gates_num:
