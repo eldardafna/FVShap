@@ -25,6 +25,10 @@ class TreeNode:
         assert 0
         pass
 
+    def simulate(self, leaves_sample):
+        assert 0
+        pass
+
 class Variable(TreeNode):
     def __init__(self, var_num):
         TreeNode.__init__(self)
@@ -57,6 +61,9 @@ class Variable(TreeNode):
         self.gamma = self.child.gamma
         self.delta = self.child.delta
 
+    def simulate(self, leaves_sample) -> bool:
+        return self.child.simulate(leaves_sample)
+
 
 class Leaf(TreeNode):
     def __init__(self, id):
@@ -88,6 +95,9 @@ class Leaf(TreeNode):
             self.gamma[1] = features_sample[list(self.influencers)[0]]
             self.delta[1] = features_sample[list(self.influencers)[0]]
 
+    def simulate(self, leaves_sample)  -> bool:
+        return bool(leaves_sample[self.id])
+
 
 class Root(TreeNode):
     def __init__(self, id):
@@ -112,6 +122,9 @@ class Root(TreeNode):
         self.child.calculate_gamma_delta(feature, features_sample)
         self.gamma = self.child.gamma
         self.delta = self.child.delta
+
+    def simulate(self, leaves_sample) -> bool:
+        return self.child.simulate(leaves_sample)
 
 class Input(Leaf):
     def __init__(self, id):
@@ -204,6 +217,9 @@ class AndGate(TreeNode):
                         self.gamma[l] += self.children[0].gamma[l0]*self.children[1].gamma[l1]
                         self.delta[l] += self.children[0].delta[l0]*self.children[1].delta[l1]
 
+    def simulate(self, leaves_sample) -> bool:
+        return self.children[0].simulate(leaves_sample) and self.children[1].simulate(leaves_sample)
+
 
 
 class NotGate(TreeNode):
@@ -234,6 +250,10 @@ class NotGate(TreeNode):
         for l in range(l_range+1):
             self.gamma[l] = math.comb(l_range, l) - self.child.gamma[l]
             self.delta[l] = math.comb(l_range, l) - self.child.delta[l]
+
+    def simulate(self, leaves_sample) -> bool:
+        return not bool(self.child.simulate(leaves_sample))
+
 
 
 class BinaryCircuit:
@@ -362,6 +382,17 @@ class BinaryCircuit:
             num_of_roots -= 1
             if num_of_roots == 0:
                 return
+
+    def simulate(self, leaves_sample, output_to_simulate) -> bool:
+        assert output_to_simulate in self.id_map
+        assert output_to_simulate.startswith('o') or output_to_simulate.startswith('b') or output_to_simulate.startswith('ln')
+        assert len([feature for feature in leaves_sample.keys() if feature not in self.id_map]) == 0
+        assert len([value for value in leaves_sample.values() if (value != 0 and value != 1)]) == 0
+
+        output_node = self.id_map[output_to_simulate]
+        return output_node.simulate(leaves_sample)
+
+
 
     #SHAP
     def calculate_gamma_delta(self, feature, features_sample, output_node):
@@ -506,6 +537,9 @@ class AAGTree:
         assert len(features_sample.keys())==self.inputs_num+self.latches_num
         return self.circuit.calculate_shap_scores(features, features_sample, output_to_check)
 
+    def simulate(self, leaves_sample, output_to_sumulate):
+        assert len(leaves_sample.keys()) == self.inputs_num + self.latches_num
+        return self.circuit.simulate(leaves_sample, output_to_sumulate)
 
 # aag = AAGTree('../aag/ff.aag')
 # aag.circuit.print()
