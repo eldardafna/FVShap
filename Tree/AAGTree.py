@@ -1,12 +1,20 @@
 from typing import Callable
 import math
 import re
+import sympy
+import datetime
+import itertools
 
 class TreeNode:
     def __init__(self):
         self.influencers = None
         self.gamma = None
         self.delta = None
+        self.gammaf = None
+        self.deltaf = None
+        self.varsforf = None
+        self.gammaf_noiif = None
+        self.deltaf_noiif = None
 
     def init_influencers(self):
         self.influencers = set()
@@ -26,6 +34,10 @@ class TreeNode:
         pass
 
     def simulate(self, leaves_sample):
+        assert 0
+        pass
+
+    def shap_formula(self):
         assert 0
         pass
 
@@ -57,12 +69,23 @@ class Variable(TreeNode):
         if None not in self.gamma:
             assert None not in self.delta
             return
+        assert None in self.delta
         self.child.calculate_gamma_delta(feature, features_sample)
         self.gamma = self.child.gamma
         self.delta = self.child.delta
 
     def simulate(self, leaves_sample) -> bool:
         return self.child.simulate(leaves_sample)
+
+    def shap_formula(self):
+        if self.varsforf is not None:
+            return
+        self.child.shap_formula()
+        self.varsforf = self.child.varsforf
+        self.gammaf = self.child.gammaf
+        self.deltaf = self.child.deltaf
+        self.gammaf_noiif = self.child.gammaf_noiif
+        self.deltaf_noiif = self.child.deltaf_noiif
 
 
 class Leaf(TreeNode):
@@ -94,9 +117,25 @@ class Leaf(TreeNode):
             self.delta[0] = 0.5
             self.gamma[1] = features_sample[list(self.influencers)[0]]
             self.delta[1] = features_sample[list(self.influencers)[0]]
+        # print("Reached Leaf!")
 
     def simulate(self, leaves_sample)  -> bool:
         return bool(leaves_sample[self.id])
+
+    def shap_formula(self):
+        assert self.varsforf is None
+        self.varsforf = {self.id}
+
+        iif = sympy.symbols(f"iif_{self.id}") #IIF = Indicator Is Feature (equals 1 if the shap calculation in rescpect of this feature, 0 otherwise)
+        fsv = sympy.symbols(f"fsv_{self.id}") #FSV = Feature Sample Value
+
+        self.gammaf = [iif*1 + (1-iif)*0.5, iif*0 + (1-iif)*fsv]
+        self.deltaf = [iif*0 + (1-iif)*0.5, iif*0 + (1-iif)*fsv]
+
+        self.gammaf_noiif = {self.id: [self.gammaf[k].subs({f"iif_{self.id}": 1} ) for k in [0, 1]],
+                             "else":  [self.gammaf[k].subs({f"iif_{self.id}": 0} ) for k in [0, 1]]}
+        self.deltaf_noiif = {self.id: [self.deltaf[k].subs({f"iif_{self.id}": 1}) for k in [0, 1]],
+                             "else": [self.deltaf[k].subs({f"iif_{self.id}": 0}) for k in [0, 1]]}
 
 
 class Root(TreeNode):
@@ -125,6 +164,15 @@ class Root(TreeNode):
 
     def simulate(self, leaves_sample) -> bool:
         return self.child.simulate(leaves_sample)
+
+    def shap_formula(self):
+        assert self.varsforf is None
+        self.child.shap_formula()
+        self.varsforf = self.child.varsforf
+        self.gammaf = self.child.gammaf
+        self.deltaf = self.child.deltaf
+        self.gammaf_noiif = self.child.gammaf_noiif
+        self.deltaf_noiif = self.child.deltaf_noiif
 
 class Input(Leaf):
     def __init__(self, id):
@@ -203,14 +251,16 @@ class AndGate(TreeNode):
         self.children[0].calculate_gamma_delta(feature, features_sample)
         self.children[1].calculate_gamma_delta(feature, features_sample)
 
+        assert len(self.children[0].influencers & self.children[1].influencers) == 0
+
         self.gamma = [0]*(len(self.influencers)+1)
         self.delta = [0]*(len(self.influencers)+1)
         l_range = self._get_range_for_gamma_delta_calculation(self, feature)
         l0_range = self._get_range_for_gamma_delta_calculation(self.children[0], feature)
         l1_range = self._get_range_for_gamma_delta_calculation(self.children[1], feature)
         for l in range(l_range+1):
-            for l0 in range(l0_range+1):
-                for l1 in  range(l1_range+1):
+            for l0 in range(min(l0_range, l)+1):
+                for l1 in  range(min(l1_range, l)+1):
                     if l0+l1==l:
                         assert self.children[0].gamma[l0] is not None
                         assert self.children[1].gamma[l1] is not None
@@ -219,6 +269,61 @@ class AndGate(TreeNode):
 
     def simulate(self, leaves_sample) -> bool:
         return self.children[0].simulate(leaves_sample) and self.children[1].simulate(leaves_sample)
+
+    def shap_formula(self):
+        assert self.varsforf is None
+        assert self.children[0].varsforf is None or self.children[1].varsforf is None
+        if self.children[0].varsforf is None:
+            self.children[0].shap_formula()
+        if self.children[1].varsforf is None:
+            self.children[1].shap_formula()
+
+        self.varsforf = self.children[0].varsforf | self.children[1].varsforf
+
+        vars_iif_formula = [0, 0]
+        for i in [0, 1]:
+            for var in self.children[i].varsforf:
+                vars_iif_formula[i] += sympy.symbols(f"iif_{var}")
+
+        self.gammaf = [0] * (len(self.varsforf) + 1)
+        self.deltaf = [0] * (len(self.varsforf) + 1)
+        l_max = len(self.varsforf)
+        l0_max = len(self.children[0].varsforf)
+        l1_max = len(self.children[1].varsforf)
+        for l in range(l_max+1):
+            for l0 in range(l0_max+1):
+                for l1 in range(l1_max+1):
+                    if l0 + l1 == l:
+                        assert self.children[0].gammaf[l0] is not None
+                        assert self.children[0].deltaf[l0] is not None
+                        assert self.children[1].gammaf[l1] is not None
+                        assert self.children[1].deltaf[l1] is not None
+
+                        if l0 != l0_max and l1 != l1_max:
+                            self.gammaf[l] += self.children[0].gammaf[l0] * self.children[1].gammaf[l1]
+                            self.deltaf[l] += self.children[0].deltaf[l0] * self.children[1].deltaf[l1]
+                        # if my feature is in vars then we multiply this by 0 because we don't need to consider it
+                        elif l0 == l0_max and l1 == l1_max:
+                            self.gammaf[l] += (1 - vars_iif_formula[0] * vars_iif_formula[1]) * (
+                                        self.children[0].gammaf[l0] * self.children[1].gammaf[l1])
+                            self.deltaf[l] += (1 - vars_iif_formula[0] * vars_iif_formula[1]) * (
+                                        self.children[0].deltaf[l0] * self.children[1].deltaf[l1])
+                        elif l0 == l0_max and l1 != l1_max:
+                            self.gammaf[l] += (1 - vars_iif_formula[0]) * (
+                                        self.children[0].gammaf[l0] * self.children[1].gammaf[l1])
+                            self.deltaf[l] += (1 - vars_iif_formula[0]) * (
+                                        self.children[0].deltaf[l0] * self.children[1].deltaf[l1])
+                        elif l0 != l0_max and l1 == l1_max:
+                            self.gammaf[l] += (1 - vars_iif_formula[1]) * (
+                                        self.children[0].gammaf[l0] * self.children[1].gammaf[l1])
+                            self.deltaf[l] += (1 - vars_iif_formula[1]) * (
+                                        self.children[0].deltaf[l0] * self.children[1].deltaf[l1])
+                        else:
+                            assert 0
+
+            self.gammaf[l] = self.gammaf[l]
+            self.deltaf[l] = self.deltaf[l]
+        print("Reached end of AND")
 
 
 
@@ -245,14 +350,43 @@ class NotGate(TreeNode):
         self.influencers = self.child.influencers
 
     def calculate_gamma_delta(self, influencer, features_sample):
+        if self.child.var_num == 34:
+            eldar = 1
         self.child.calculate_gamma_delta(influencer, features_sample)
-        l_range = len(self.influencers)-1 if (influencer in self.influencers) else len(self.influencers)
-        for l in range(l_range+1):
-            self.gamma[l] = math.comb(l_range, l) - self.child.gamma[l]
-            self.delta[l] = math.comb(l_range, l) - self.child.delta[l]
+        if influencer in self.influencers:
+            for l in range(len(self.influencers)-1+1):
+                self.gamma[l] = math.comb(len(self.influencers)-1, l) - self.child.gamma[l]
+                self.delta[l] = math.comb(len(self.influencers)-1, l) - self.child.delta[l]
+        else:
+            for l in range(len(self.influencers)+1):
+                self.gamma[l] = math.comb(len(self.influencers), l) - self.child.gamma[l]
+                self.delta[l] = math.comb(len(self.influencers), l) - self.child.delta[l]
 
     def simulate(self, leaves_sample) -> bool:
         return not bool(self.child.simulate(leaves_sample))
+
+    def shap_formula(self):
+        assert self.varsforf is None
+        self.child.shap_formula()
+        self.varsforf = self.child.varsforf
+
+        vars_iif_formula = 0
+        for var in self.varsforf:
+            vars_iif_formula += sympy.symbols(f"iif_{var}")
+        l_max = len(self.varsforf)
+        self.gammaf = [0] * (len(self.varsforf) + 1)
+        self.deltaf = [0] * (len(self.varsforf) + 1)
+        for l in range(l_max): # Without the last one
+            self.gammaf[l] = sympy.binomial(l_max-vars_iif_formula, l) - self.child.gammaf[l] #FIXME
+            self.deltaf[l] = sympy.binomial(l_max-vars_iif_formula, l) - self.child.deltaf[l] #FIXME
+            # self.gammaf[l] = vars_iif_formula*math.comb(l_max-1, l) + (1-vars_iif_formula)*math.comb(l_max, l) - self.child.gammaf[l]
+            # self.deltaf[l] = vars_iif_formula*math.comb(l_max-1, l) + (1-vars_iif_formula)*math.comb(l_max, l) - self.child.deltaf[l]
+
+
+
+        #the last one will be multiply by 0 if my feature is in vars
+        self.gammaf[l_max] = (1-vars_iif_formula)*math.comb(l_max, l) - self.child.gammaf[l_max]
+        self.deltaf[l_max] = (1-vars_iif_formula)*math.comb(l_max, l) - self.child.deltaf[l_max]
 
 
 
@@ -443,6 +577,33 @@ class BinaryCircuit:
 
         return shap_scores
 
+    def shap_formula(self, root_to_check):
+        assert root_to_check in self.id_map
+        assert root_to_check.startswith('o') or root_to_check.startswith('b') or root_to_check.startswith('ln')
+
+        root_node = self.id_map[root_to_check]
+        root_node.shap_formula()
+        varsforf_size = len(root_node.varsforf)
+
+        leaves = self.inputs+self.latches_prev
+        iif_leaves = {leaf.id: sympy.symbols(f"iif_{leaf.id}") for leaf in leaves}
+        fsv_leaves = {leaf.id: sympy.symbols(f"fsv_{leaf.id}") for leaf in leaves}
+
+        # Need to find the right feature sample value
+        iif_multiply_fsv_formula = 0
+        for leaf in leaves:
+            iif_multiply_fsv_formula += iif_leaves[leaf.id]*fsv_leaves[leaf.id]
+
+        final_shap_formula = 0
+        for k in range(varsforf_size):
+            coefficient = math.factorial(k) * math.factorial(varsforf_size - k - 1) / math.factorial(varsforf_size)
+            final_shap_formula += coefficient * (iif_multiply_fsv_formula-0.5) * (root_node.gammaf[k] - root_node.deltaf[k])
+
+        print(root_node.gammaf)
+        print(root_node.deltaf)
+
+        return final_shap_formula
+
 
 class AAGTree:
     def _parse_header_aag(self, header):
@@ -533,6 +694,11 @@ class AAGTree:
 
                 line_num += 1
 
+        self.aag_shap_formula = None
+
+    def print(self):
+        self.circuit.print()
+
     def shap_scores(self, features, features_sample, output_to_check):
         assert len(features_sample.keys())==self.inputs_num+self.latches_num
         return self.circuit.calculate_shap_scores(features, features_sample, output_to_check)
@@ -541,11 +707,153 @@ class AAGTree:
         assert len(leaves_sample.keys()) == self.inputs_num + self.latches_num
         return self.circuit.simulate(leaves_sample, output_to_sumulate)
 
-# aag = AAGTree('../aag/ff.aag')
-# aag.circuit.print()
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'o0'))
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 1}, 'o0'))
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'o1'))
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 1}, 'o1'))
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
-# print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 1, 'i1': 0, 'lp0': 1}, 'ln0'))
+
+    def shap_formula(self, root_to_check):
+        if self.aag_shap_formula is None:
+            self.aag_shap_formula = self.circuit.shap_formula(root_to_check)
+            # self.aag_shap_formula = sympy.N(self.aag_shap_formula, 2)
+        return self.aag_shap_formula
+
+    def get_shap_formula(self, root_to_check):
+        self.shap_formula(root_to_check)
+        return self.aag_shap_formula
+
+    def shap_scores_using_formula(self, leaves_in_respect, sample, root_to_check):
+        assert len(leaves_in_respect) == 1 #FIXME: other lens not supported yet
+        assert leaves_in_respect[0] in self.circuit.id_map.keys()
+        assert leaves_in_respect[0].startswith('i') or leaves_in_respect[0].startswith('lp')
+        if self.aag_shap_formula is None:
+            self.circuit.shap_formula(root_to_check)
+        subs_dict = {}
+        for leaf in self.circuit.inputs + self.circuit.latches_prev:
+            subs_dict[f"fsv_{leaf.id}"] = sample[leaf.id]
+            if leaf.id == leaves_in_respect[0]:
+                subs_dict[f"iif_{leaf.id}"] = 1
+            else:
+                subs_dict[f"iif_{leaf.id}"] = 0
+        return self.aag_shap_formula.subs(subs_dict)
+
+
+if __name__ == "__main__":
+    # aag = AAGTree('../aag/ff.aag')
+    # aag.circuit.print()
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'o0'))
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 1}, 'o0'))
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'o1'))
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 1}, 'o1'))
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    # print(aag.shap_scores(['i0', 'i1', 'lp0'], {'i0': 1, 'i1': 0, 'lp0': 1}, 'ln0'))
+    #
+    # aag = AAGTree('../aag/and.aag')
+    # aag.print()
+    # formula = aag.shap_formula('o0')
+    # expanded = sympy.expand(formula).simplify()
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  0, 'fsv_i1': 0}))
+    # print(aag.shap_scores(['i0'], {'i0': 0, 'i1': 0}, 'o0'))
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  0, 'fsv_i1': 1}))
+    # print(aag.shap_scores(['i0'], {'i0': 0, 'i1': 1}, 'o0'))
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  1, 'fsv_i1': 0}))
+    # print(aag.shap_scores(['i0'], {'i0': 1, 'i1': 0}, 'o0'))
+    #
+    # print()
+    # print(aag.shap_scores(['i0'], {'i0': 1, 'i1': 1}, 'o0'))
+    # print(aag.shap_scores_using_formula(['i0'], {'i0': 1, 'i1': 1}, 'o0'))
+    #
+    # print()
+    # a = expanded.subs({'iif_i0': 1, 'iif_i1': 0}).simplify()
+    # b = expanded.subs({'iif_i0': 0, 'iif_i1': 1}).simplify()
+    # print(a+b)
+    #
+    # aag = AAGTree('../aag/half_adder.aag')
+    # aag.print()
+    # formula = aag.get_shap_formula('o0')
+    # print(formula)
+    #
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  0, 'fsv_i1': 0}))
+    # print(aag.shap_scores(['i0'], {'i0': 0, 'i1': 0}, 'o0'))
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  0, 'fsv_i1': 1}))
+    # print(aag.shap_scores(['i0'], {'i0': 0, 'i1': 1}, 'o0'))
+    #
+    # print()
+    # print(expanded.subs({'iif_i0': 1, 'iif_i1': 0, 'fsv_i0':  1, 'fsv_i1': 0}))
+    # print(aag.shap_scores(['i0'], {'i0': 1, 'i1': 0}, 'o0'))
+    #
+    # print()
+    # print(aag.shap_scores(['i0'], {'i0': 1, 'i1': 1}, 'o0'))
+    # print(aag.shap_scores_using_formula(['i0'], {'i0': 1, 'i1': 1}, 'o0'))
+    #
+    # print()
+    # a = formula.subs({'iif_i0': 1, 'iif_i1': 0}).simplify()
+    # b = formula.subs({'iif_i0': 0, 'iif_i1': 1}).simplify()
+    # print("a: ", a)
+    # print("b: ", b)
+    # ab = a+b
+    # print("a+b:", ab)
+    # print(ab.subs({'fsv_i0': 0, 'fsv_i1': 0}))
+    # print(ab.subs({'fsv_i0': 0, 'fsv_i1': 1}))
+    # print(ab.subs({'fsv_i0': 1, 'fsv_i1': 0}))
+    # print(ab.subs({'fsv_i0': 1, 'fsv_i1': 1}))
+
+    aag = AAGTree('../aag/coverted_aig/miim.aag')
+    aag.print()
+    print(datetime.datetime.now())
+    formula = aag.get_shap_formula('ln35')
+    print("Finished: ", datetime.datetime.now())
+    # print(formula)
+    # subs_dict = {}
+    # for leaf in aag.circuit.inputs + aag.circuit.latches_prev:
+    #     subs_dict[f"fsv_{leaf.id}"] = 0
+    #     subs_dict[f"iif_{leaf.id}"] = 1 if (leaf.id == 'i33') else 0
+    # print(formula.subs(subs_dict))
+
+    # leaves = aag.circuit.inputs + aag.circuit.latches_prev
+    # total_formula = 0
+    # for leaf_turned_on in leaves:
+    #     for leaf in leaves:
+    #         # subs_dict[f"fsv_{leaf.id}"] = 0
+    #         if leaf.id == leaf_turned_on.id:
+    #             subs_dict[f"iif_{leaf.id}"] = 1
+    #         else:
+    #             subs_dict[f"iif_{leaf.id}"] = 0
+    #     step_formula = formula.subs(subs_dict)
+    #     total_formula += step_formula
+    #     print(step_formula)
+    # print(total_formula)
+
+    #
+    # print()
+    # print(aag.shap_scores(['lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    # print(aag.shap_scores_using_formula(['lp0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    #
+    #
+    # print()
+    # print(aag.shap_scores(['i0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    # print(aag.shap_scores_using_formula(['i0'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    #
+    # print()
+    # print(aag.shap_scores(['i1'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    # print(aag.shap_scores_using_formula(['i1'], {'i0': 0, 'i1': 0, 'lp0': 0}, 'ln0'))
+    #
+    #
+    #
+    # # print()
+    # # a = formula.subs({'iif_i0': 1, 'iif_i1': 0}).simplify()
+    # # b = formula.subs({'iif_i0': 0, 'iif_i1': 1}).simplify()
+    # # print("a: ", a)
+    # # print("b: ", b)
+    # # ab = a+b
+    # # print("a+b:", ab)
+    # # print(ab.subs({'fsv_i0': 0, 'fsv_i1': 0}))
+    # # print(ab.subs({'fsv_i0': 0, 'fsv_i1': 1}))
+    # # print(ab.subs({'fsv_i0': 1, 'fsv_i1': 0}))
+# # print(ab.subs({'fsv_i0': 1, 'fsv_i1': 1}))
