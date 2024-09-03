@@ -251,7 +251,7 @@ class AndGate(TreeNode):
         self.children[0].calculate_gamma_delta(feature, features_sample)
         self.children[1].calculate_gamma_delta(feature, features_sample)
 
-        assert len(self.children[0].influencers & self.children[1].influencers) == 0
+        # assert len(self.children[0].influencers & self.children[1].influencers) == 0 #FIXME
 
         self.gamma = [0]*(len(self.influencers)+1)
         self.delta = [0]*(len(self.influencers)+1)

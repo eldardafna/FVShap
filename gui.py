@@ -1,4 +1,6 @@
 import tkinter as tk
+
+import utilis
 from Tree.AAGTree import AAGTree
 
 def on_submit(inputs_entries, output_vars, tree):
@@ -25,6 +27,7 @@ def on_submit(inputs_entries, output_vars, tree):
                                features_sample=inputs_sample,
                                output_to_check=output)
         print(output, ": ", res)
+        utilis.print_shap_chart(res)
     print()
 
 def open_gui(inputs, outputs, tree):
