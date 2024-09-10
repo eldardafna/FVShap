@@ -19,7 +19,7 @@ def open_gui(aag_tree: AAGTree):
 
 def print_shap_chart(shap_scores, highlight_color='dodgerblue', color_positive='cornflowerblue', color_negative='violet'):
     # Sort the array
-    sorted_shap_scores = sorted(shap_scores.items(), key=lambda x: abs(x[1]), reverse=True)
+    sorted_shap_scores = sorted([item for item in shap_scores.items() if item[1]!=0], key=lambda x: abs(x[1]), reverse=True)
 
     # Extract names and values from the dictionary
     labels, values = zip(*sorted_shap_scores)
@@ -72,4 +72,4 @@ def print_shap_chart(shap_scores, highlight_color='dodgerblue', color_positive='
 
     plt.show()
 
-print_shap_chart({'x': 0.25, 'y': -0.5, 'z': -0.2})
+# print_shap_chart({'x': 0.25, 'y': -0.5, 'z': -0.2})

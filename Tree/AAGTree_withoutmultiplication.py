@@ -4,68 +4,6 @@ import re
 import sympy
 import datetime
 import itertools
-from copy import deepcopy
-
-class Influencers:
-    def __init__(self):
-        self.infl_dict = {}
-
-    def get_copy(self):
-        return deepcopy(self)
-
-    def add_influencer(self, influencer):
-        if influencer not in self.infl_dict:
-            self.infl_dict[influencer] = 1
-        else:
-            self.infl_dict[influencer] += 1
-
-    def get_num_distinct(self, without=None):
-        if without is None:
-            return len(self.infl_dict.keys())
-        else:
-            return len(self.infl_dict.keys()-[without])
-
-    def get_num_with_multiplication(self, without=None):
-        if without is None:
-            return sum(self.infl_dict.values())
-        else:
-            out_sum = 0
-            for infl, multi in self.infl_dict.items():
-                if infl != without:
-                    out_sum += multi
-            return out_sum
-
-    def get_distinct_list(self, without=None):
-        if without is None:
-            return list(self.infl_dict.keys())
-        else:
-            return list(self.infl_dict.keys()-[without])
-
-    def __add__(self, other):
-        out = other.get_copy()
-        for infl in self.infl_dict.keys():
-            if infl in out.infl_dict:
-                out.infl_dict[infl] += self.infl_dict[infl]
-            else:
-                out.infl_dict[infl] = self.infl_dict[infl]
-        return out
-
-    def is_in(self, id):
-        return id in self.infl_dict
-
-    def is_empty(self):
-        return self.get_num_with_multiplication()==0
-
-    def common_num_with_multiplication(self, other, without=None):
-        out = 0
-        for infl in self.infl_dict.keys():
-            if infl in other.infl_dict:
-                if without is not None and infl != without:
-                    out += min(self.infl_dict[infl], other.infl_dict[infl])
-
-        return out
-
-print_cnt = 0
 
 class TreeNode:
     def __init__(self):
@@ -77,17 +15,15 @@ class TreeNode:
         self.varsforf = None
         self.gammaf_noiif = None
         self.deltaf_noiif = None
-        self.visited = False
 
     def init_influencers(self):
-        self.influencers = Influencers()
+        self.influencers = set()
 
     def init_gamma_delta(self):
         assert self.influencers is not None
-        assert self.influencers.get_num_distinct() > 0
-        self.gamma = [None] * (self.influencers.get_num_with_multiplication()+1)
-        self.delta = [None] * (self.influencers.get_num_with_multiplication()+1)
-        self.visited = False
+        assert len(self.influencers) > 0
+        self.gamma = [None] * (len(self.influencers)+1)
+        self.delta = [None] * (len(self.influencers)+1)
 
     def calculate_influencers(self):
         assert 0
@@ -130,34 +66,19 @@ class Variable(TreeNode):
         func(self)
 
     def calculate_influencers(self):
-        if self.influencers.is_empty():
-            self.child.calculate_influencers()
-            self.influencers = self.child.influencers.get_copy()
+        self.child.calculate_influencers()
+        self.influencers = self.child.influencers
 
     def calculate_gamma_delta(self, feature, features_sample, special_probs):
         # if None not in self.gamma:
         #     assert None not in self.delta
         #     return
         # assert None in self.delta
-        #
-        # assert len([x for x in self.gamma if x is not None]) == 0
-        # assert len([x for x in self.delta if x is not None]) == 0
-        # # FIXME: uncomment above
-        if self.visited:
-            assert self.gamma is not None
-            assert self.delta is not None
-            # assert None not in self.gamma
-            # assert None not in self.delta
-            return
+        # FIXME: uncomment
 
         self.child.calculate_gamma_delta(feature, features_sample, special_probs)
-        self.visited = True
         self.gamma = self.child.gamma
         self.delta = self.child.delta
-
-        # global print_cnt
-        # print("Reached end of Variable ", self.var_num, "-  ", print_cnt)
-        # print_cnt += 1
 
     def calculate_prob_res_given_infl_1_and_feature_value(self, feature, feature_value, infl, res):
         return self.child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, res)
@@ -191,14 +112,13 @@ class Leaf(TreeNode):
         func(self)
 
     def calculate_influencers(self):
-        self.influencers.add_influencer(self.id)
+        self.influencers = {self.id}
 
 
     def calculate_gamma_delta(self, feature, features_sample, special_probs):
-        assert self.influencers.get_num_with_multiplication() == 1
-        infl = self.influencers.get_distinct_list()[0]
+        assert len(self.influencers) == 1
 
-        if infl == feature:
+        if list(self.influencers)[0] == feature:
             self.gamma = [1]
             self.delta = [0]
         else:
@@ -206,15 +126,15 @@ class Leaf(TreeNode):
             self.gamma[0] = probs["gamma"]
             self.delta[0] = probs["delta"]
 
-            if (probs["gamma"] == 1 and features_sample[infl] == 0) or (probs["gamma"] == 0 and features_sample[infl] == 1):
+            if (probs["gamma"] == 1 and features_sample[list(self.influencers)[0]] == 0) or (probs["gamma"] == 0 and features_sample[list(self.influencers)[0]] == 1):
                 self.gamma[1] = 0
             else:
-                self.gamma[1] = features_sample[infl]
+                self.gamma[1] = features_sample[list(self.influencers)[0]]
 
-            if (probs["delta"] == 1 and features_sample[infl] == 0) or (probs["delta"] == 0 and features_sample[infl] == 1):
+            if (probs["delta"] == 1 and features_sample[list(self.influencers)[0]] == 0) or (probs["delta"] == 0 and features_sample[list(self.influencers)[0]] == 1):
                 self.delta[1] = 0
             else:
-                self.delta[1] = features_sample[infl]
+                self.delta[1] = features_sample[list(self.influencers)[0]]
 
             # value = features_sample[list(self.influencers)[0]]
             # self.gamma = [1-value, value]
@@ -265,7 +185,7 @@ class Root(TreeNode):
 
     def calculate_influencers(self):
         self.child.calculate_influencers()
-        self.influencers = self.child.influencers.get_copy()
+        self.influencers = self.child.influencers
 
     def calculate_gamma_delta(self, feature, features_sample, special_probs):
         self.child.calculate_gamma_delta(feature, features_sample, special_probs)
@@ -356,11 +276,11 @@ class AndGate(TreeNode):
     def calculate_influencers(self):
         self.children[0].calculate_influencers()
         self.children[1].calculate_influencers()
-        self.influencers = self.children[0].influencers + self.children[1].influencers
+        self.influencers = self.children[0].influencers | self.children[1].influencers
 
     @staticmethod
     def _get_range_for_gamma_delta_calculation(influencers, feature):
-        return influencers.get_num_with_multiplication(without=feature)
+        return len(influencers)-1 if (feature in influencers) else len(influencers)
     def calculate_gamma_delta(self, feature, features_sample, special_probs):
         # assert (len(self.children[0].influencers & self.children[1].influencers) == 0 or self.children[0].influencers & self.children[1].influencers == self.influencers) # assumption FIXME
         #
@@ -416,55 +336,52 @@ class AndGate(TreeNode):
             self.children[0].calculate_gamma_delta(feature, features_sample, special_probs)
             self.children[1].calculate_gamma_delta(feature, features_sample, special_probs)
 
-            self.gamma = [0]*(self.influencers.get_num_with_multiplication(without=feature)+1)
-            self.delta = [0]*(self.influencers.get_num_with_multiplication(without=feature)+1)
+            self.gamma = [0]*(len(self.influencers)+1)
+            self.delta = [0]*(len(self.influencers)+1)
+
+            exclusive0 = self.children[0].influencers
+            exclusive1 = self.children[1].influencers
 
             l_range = self._get_range_for_gamma_delta_calculation(self.influencers, feature)
-
-            l0_total_num = self.children[0].influencers.get_num_with_multiplication(without=feature)
-            l1_total_num = self.children[1].influencers.get_num_with_multiplication(without=feature)
-            l0_range = l0_total_num
-            l1_range = l1_total_num
-
+            l0_range = self._get_range_for_gamma_delta_calculation(exclusive0, feature)
+            l1_range = self._get_range_for_gamma_delta_calculation(exclusive1, feature)
             for l in range(l_range+1):
                 for l0 in range(min(l0_range, l)+1):
-                    for l1 in range(min(l1_range, l-l0)+1):
-                            if l0+l1==l:
-                                assert self.children[0].gamma[l0] is not None
-                                assert self.children[1].gamma[l1] is not None
-                                self.gamma[l] += self.children[0].gamma[l0]*self.children[1].gamma[l1]
-                                self.delta[l] += self.children[0].delta[l0]*self.children[1].delta[l1]
+                    for l1 in range(min(l1_range, l)+1):
+                        if l0+l1==l:
+                            assert self.children[0].gamma[l0] is not None
+                            assert self.children[1].gamma[l1] is not None
+                            self.gamma[l] += self.children[0].gamma[l0]*self.children[1].gamma[l1]
+                            self.delta[l] += self.children[0].delta[l0]*self.children[1].delta[l1]
 
-            eldar = 1
+    def calculate_prob_res_given_infl_1_and_feature_value(self, feature, feature_value, infl, res):
+        assert infl in self.influencers
+        assert len(self.children[0].influencers & self.children[1].influencers) == 0 # assumption FIXME
 
-    # def calculate_prob_res_given_infl_1_and_feature_value(self, feature, feature_value, infl, res):
-    #     assert self.influencers.is_in(infl)
-    #     assert len(self.children[0].influencers & self.children[1].influencers) == 0 # assumption FIXME
-    #
-    #     if infl in self.children[0].influencers:
-    #         infl_child = self.children[0]
-    #         other_child = self.children[1]
-    #     elif infl in self.children[1].influencers:
-    #         infl_child = self.children[1]
-    #         other_child = self.children[0]
-    #
-    #     if feature_value == 1:
-    #         p_other_child_1 = other_child.gamma[0]
-    #     elif feature_value == 0:
-    #         p_other_child_1 = other_child.delta[0]
-    #     else:
-    #         assert 0
-    #     p_other_child_0 = 1 - p_other_child_1
-    #
-    #     if res == 0:
-    #         p_child_0_given_infl_1 = infl_child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 0)
-    #         return p_child_0_given_infl_1 + p_other_child_0 - p_child_0_given_infl_1*p_other_child_0
-    #
-    #     elif res == 1:
-    #         p_child_1_given_infl_1 = infl_child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 1)
-    #         return p_child_1_given_infl_1*p_other_child_1
-    #     else:
-    #         assert 0
+        if infl in self.children[0].influencers:
+            infl_child = self.children[0]
+            other_child = self.children[1]
+        elif infl in self.children[1].influencers:
+            infl_child = self.children[1]
+            other_child = self.children[0]
+
+        if feature_value == 1:
+            p_other_child_1 = other_child.gamma[0]
+        elif feature_value == 0:
+            p_other_child_1 = other_child.delta[0]
+        else:
+            assert 0
+        p_other_child_0 = 1 - p_other_child_1
+
+        if res == 0:
+            p_child_0_given_infl_1 = infl_child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 0)
+            return p_child_0_given_infl_1 + p_other_child_0 - p_child_0_given_infl_1*p_other_child_0
+
+        elif res == 1:
+            p_child_1_given_infl_1 = infl_child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 1)
+            return p_child_1_given_infl_1*p_other_child_1
+        else:
+            assert 0
 
     def simulate(self, leaves_sample) -> bool:
         return self.children[0].simulate(leaves_sample) and self.children[1].simulate(leaves_sample)
@@ -524,45 +441,6 @@ class AndGate(TreeNode):
             self.deltaf[l] = self.deltaf[l]
         print("Reached end of AND")
 
-class OrGate(TreeNode):
-    def __init__(self):
-        TreeNode.__init__(self)
-        self.parent = None
-        self.children = [None, None]
-
-    def print(self, level):
-        print(' ' * (level * 4) + "OR")
-        self.children[0].print(level + 1)
-        self.children[1].print(level + 1)
-
-    def search_up(self, func: Callable[[TreeNode], None]):
-        func(self)
-        self.parent.search_up(func)
-
-    def search_down(self, func:Callable[[], None]):
-        self.children[0].search_down(func)
-        self.children[1].search_down(func)
-        func(self)
-
-    def calculate_influencers(self):
-        self.children[0].calculate_influencers()
-        self.children[1].calculate_influencers()
-        self.influencers = self.children[0].influencers + self.children[1].influencers
-
-
-    def calculate_gamma_delta(self, feature, features_sample, special_probs):
-        self.children[0].calculate_gamma_delta(feature, features_sample, special_probs)
-        self.children[1].calculate_gamma_delta(feature, features_sample, special_probs)
-
-        assert self.children[0].influencers == self.children[1].influencers
-
-        for l in range(self.influencers.get_num_with_multiplication(without=feature)+1):
-            self.gamma[l] = self.children[0].gamma[l] + self.children[1].gamma[l]
-            self.delta[l] = self.children[0].delta[l] + self.children[1].delta[l]
-
-
-    def simulate(self, leaves_sample) -> bool:
-        return self.children[0].simulate(leaves_sample) or self.children[1].simulate(leaves_sample)
 
 
 class NotGate(TreeNode):
@@ -585,25 +463,22 @@ class NotGate(TreeNode):
 
     def calculate_influencers(self):
         self.child.calculate_influencers()
-        self.influencers = self.child.influencers.get_copy()
+        self.influencers = self.child.influencers
 
     def calculate_gamma_delta(self, influencer, features_sample, special_probs):
         self.child.calculate_gamma_delta(influencer, features_sample, special_probs)
-        for l in range(self.influencers.get_num_with_multiplication(without=influencer)+1):
-            self.gamma[l] = math.comb(self.influencers.get_num_with_multiplication(without=influencer), l) - self.child.gamma[l]
-            self.delta[l] = math.comb(self.influencers.get_num_with_multiplication(without=influencer), l) - self.child.delta[l]
-        # if self.influencers.is_in(influencer):
-        #     for l in range(len(self.influencers)-1+1):
-        #         self.gamma[l] = math.comb(len(self.influencers)-1, l) - self.child.gamma[l]
-        #         self.delta[l] = math.comb(len(self.influencers)-1, l) - self.child.delta[l]
-        # else:
-        #     for l in range(len(self.influencers)+1):
-        #         self.gamma[l] = math.comb(len(self.influencers), l) - self.child.gamma[l]
-        #         self.delta[l] = math.comb(len(self.influencers), l) - self.child.delta[l]
+        if influencer in self.influencers:
+            for l in range(len(self.influencers)-1+1):
+                self.gamma[l] = math.comb(len(self.influencers)-1, l) - self.child.gamma[l]
+                self.delta[l] = math.comb(len(self.influencers)-1, l) - self.child.delta[l]
+        else:
+            for l in range(len(self.influencers)+1):
+                self.gamma[l] = math.comb(len(self.influencers), l) - self.child.gamma[l]
+                self.delta[l] = math.comb(len(self.influencers), l) - self.child.delta[l]
 
-    # def calculate_prob_res_given_infl_1_and_feature_value(self, feature, feature_value, infl, res):
-    #     assert infl in self.influencers
-    #     return self.child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 1-res)
+    def calculate_prob_res_given_infl_1_and_feature_value(self, feature, feature_value, infl, res):
+        assert infl in self.influencers
+        return self.child.calculate_prob_res_given_infl_1_and_feature_value(feature, feature_value, infl, 1-res)
 
     def simulate(self, leaves_sample) -> bool:
         return not bool(self.child.simulate(leaves_sample))
@@ -792,10 +667,10 @@ class BinaryCircuit:
         output_node.calculate_influencers()
 
         for feature in features:
-            if not output_node.influencers.is_in(feature):
+            if feature not in output_node.influencers:
                 shap_scores[feature] = 0
                 continue
-            print("Feature: ", feature)
+
             self.calculate_gamma_delta(feature, features_sample, output_node, {})
 
             # for k in range(features_num):
@@ -808,7 +683,7 @@ class BinaryCircuit:
             #     (features_sample[feature] - 0.5) * (output_node.gamma[k] - output_node.delta[k]))
 
             #FIXME: changed because only calculate for inputs in coi
-            coi_features_num = output_node.influencers.get_num_with_multiplication(without=feature)+1
+            coi_features_num = len(output_node.influencers)
             for k in range(coi_features_num):
                 coefficient = math.factorial(k) * math.factorial(coi_features_num - k - 1) / math.factorial(coi_features_num)
                 assert len(output_node.gamma) >= k
