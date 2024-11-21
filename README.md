@@ -1,4 +1,4 @@
-# Shap API
+# FVShap API
 
 The `Shap` class provides functionality for calculating SHAP (Shapley Additive Explanations) scores for boolean functions represented as AAG\AIG\CNF files. It implements the algorithm in the following article: https://arxiv.org/pdf/2007.14045 
 It supports various modes to use the algorithm with a composable ciruit. 
@@ -10,6 +10,7 @@ It supports various modes to use the algorithm with a composable ciruit.
   - **VARIABLE_INSTANCES_AS_PLAYERS**: Treats each variable instance as a different player.
   - **CHANGE_TO_AVERAGE_GATE**: Interprets composable AND gates as AVERAGE gates for polynomial time computation. An AVERAGE gate is similar to the AND gate - it gets two inputs and outputs 0 if both inputs are false, 1 if both are true, and 0.5 if only one input is true.
 - Computes SHAP scores for boolean functions.
+- Shap playground, which uses a gui and graphs to help understand the shap scores.
 
 ## External Tools
 - AIG-to-AAG conversion tool (`aigtoaig`\'aiger')
@@ -96,4 +97,37 @@ shap_instance.simulate(sample)
 shap_scores = shap_instance.calculate_shap_scores('b0', sample)
 print(shap_scores)
 ```
+
+## Shap Playground
+
+The Shap Playground is an interactive tool for working with the SHAP api and analyzing the impact of different inputs on the outputs.
+
+### Usage
+
+#### 1. Init
+
+You can load a circuit file (AAG, AIG, or CNF) into the Shap Playground:
+
+```python
+alu = init_from_file("path/to/circuit.aag", mode="CHANGE_TO_AVERAGE_GATE", should_print=False)
+```
+- `file_path`: Path to your AAG, AIG, or CNF file.
+- `mode`: The mode to change the gates (optional).
+- `should_print`: Print the internal structure of the loaded circuit (optional).
+
+#### 1. Define an Input Sample
+
+Define a sample to pass to the circuit for simulation and SHAP calculation:
+
+```python
+sample = alu.get_sample(...)
+```
+
+#### 3. Open the GUI
+To visualize and interact with the circuit, you can launch the GUI:
+
+```python
+open_gui(alu, init_sample=sample)
+```
+
 
